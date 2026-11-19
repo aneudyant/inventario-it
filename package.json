@@ -1,0 +1,15 @@
+{
+  "name": "inventario-it",
+  "version": "1.0.0",
+  "description": "Formulario CRUD de inventario del departamento de IT con Node.js, Express y SQLite",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["inventario", "it", "crud", "express", "sqlite"],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0",
+    "sqlite3": "^5.1.7"
+  }
+}
