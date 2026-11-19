@@ -21,6 +21,7 @@ const tablaBody = document.getElementById('tabla-equipos-body');
 const contadorRegistros = document.getElementById('contador-registros');
 const filtroBuscar = document.getElementById('filtro-buscar');
 const filtroCategoria = document.getElementById('filtro-categoria');
+const btnBuscar = document.getElementById('btn-buscar');
 const btnLimpiarFiltros = document.getElementById('btn-limpiar-filtros');
 
 let equiposCache = [];
@@ -228,17 +229,15 @@ tablaBody.addEventListener('click', async (e) => {
   }
 });
 
-btnCancelar.addEventListener('click', () => {
-  ocultarAlerta();
-  resetearFormulario();
-});
-
-filtroBuscar.addEventListener('input', () => {
+btnBuscar.addEventListener('click', () => {
   consultarEquipos();
 });
 
-filtroCategoria.addEventListener('change', () => {
-  consultarEquipos();
+filtroBuscar.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    consultarEquipos();
+  }
 });
 
 btnLimpiarFiltros.addEventListener('click', () => {
@@ -247,5 +246,6 @@ btnLimpiarFiltros.addEventListener('click', () => {
   consultarEquipos();
 });
 
+// Inicialización
 inputFecha.value = fechaHoyISO();
 consultarEquipos();
