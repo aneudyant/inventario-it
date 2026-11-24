@@ -1,4 +1,30 @@
-const API_URL = '/api/equipos';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js';
+import {
+  getFirestore,
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  where,
+  orderBy
+} from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: 'AIzaSyC8RhW4-LEYY0UOJWfbPPqJocNTUCy-3Uw',
+  authDomain: 'inventario-it-crud.firebaseapp.com',
+  projectId: 'inventario-it-crud',
+  storageBucket: 'inventario-it-crud.firebasestorage.app',
+  messagingSenderId: '784646925465',
+  appId: '1:784646925465:web:3b4da7cb4e190f32b31c08',
+  measurementId: 'G-T0DEPQ0BG3'
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const equiposRef = collection(db, 'equipos_it');
 
 const form = document.getElementById('equipo-form');
 const formTitle = document.getElementById('form-title');
@@ -63,7 +89,7 @@ function cargarEnFormulario(equipo) {
   inputAsignado.value = equipo.asignado_a || '';
   inputCantidad.value = equipo.cantidad || 1;
 
-  formTitle.textContent = `Modificar equipo #${equipo.id}`;
+  formTitle.textContent = `Modificar equipo ${equipo.codigo_activo}`;
   formHint.textContent = 'Edita los datos necesarios y pulsa "Actualizar equipo".';
   btnSubmit.textContent = 'Actualizar equipo';
   btnCancelar.classList.remove('hidden');
@@ -100,10 +126,10 @@ function renderizarTabla(equipos) {
         <td>${escaparHTML(eq.cantidad)}</td>
         <td>${escaparHTML(eq.fecha_registro)}</td>
         <td class="actions-cell">
-          <button type="button" class="btn btn-sm btn-edit" data-action="edit" data-id="${eq.id}">
+          <button type="button" class="btn btn-sm btn-edit" data-action="edit" data-id="${escaparHTML(eq.id)}">
             Editar
           </button>
-          <button type="button" class="btn btn-sm btn-delete" data-action="delete" data-id="${eq.id}">
+          <button type="button" class="btn btn-sm btn-delete" data-action="delete" data-id="${escaparHTML(eq.id)}">
             Borrar
           </button>
         </td>
@@ -114,41 +140,68 @@ function renderizarTabla(equipos) {
 }
 
 async function consultarEquipos() {
-  const params = new URLSearchParams();
-  if (filtroBuscar.value.trim() !== '') {
-    params.set('buscar', filtroBuscar.value.trim());
-  }
-  if (filtroCategoria.value !== 'Todas') {
-    params.set('categoria', filtroCategoria.value);
-  }
-
-  const url = params.toString() ? `${API_URL}?${params.toString()}` : API_URL;
+  const textoBuscar = filtroBuscar.value.trim().toLowerCase();
+  const categoriaSeleccionada = filtroCategoria.value;
 
   try {
-    const resp = await fetch(url);
-    const data = await resp.json();
-    if (!resp.ok) {
-      throw new Error(data.error || 'No se pudieron consultar los registros.');
+    let q;
+    if (categoriaSeleccionada && categoriaSeleccionada !== 'Todas') {
+      q = query(equiposRef, where('categoria', '==', categoriaSeleccionada));
+    } else {
+      q = query(equiposRef, orderBy('creadoEn', 'desc'));
     }
-    renderizarTabla(data);
+
+    const snapshot = await getDocs(q);
+    let lista = snapshot.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...docSnap.data()
+    }));
+
+    if (categoriaSeleccionada && categoriaSeleccionada !== 'Todas') {
+      lista.sort((a, b) => (b.creadoEn || 0) - (a.creadoEn || 0));
+    }
+
+    if (textoBuscar !== '') {
+      lista = lista.filter((eq) => {
+        const campos = [
+          eq.codigo_activo,
+          eq.nombre_equipo,
+          eq.numero_serie,
+          eq.asignado_a,
+          eq.estado
+        ];
+        return campos.some((campo) => String(campo || '').toLowerCase().includes(textoBuscar));
+      });
+    }
+
+    renderizarTabla(lista);
   } catch (err) {
-    tablaBody.innerHTML = `<tr><td colspan="9" class="empty-cell">${escaparHTML(err.message)}</td></tr>`;
+    console.error('Error al consultar Firestore:', err);
+    tablaBody.innerHTML =
+      '<tr><td colspan="9" class="empty-cell">No se pudieron cargar los registros desde Firebase.</td></tr>';
   }
+}
+
+async function existeCodigoActivo(codigo, idExcluir = '') {
+  const q = query(equiposRef, where('codigo_activo', '==', codigo));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.some((docSnap) => docSnap.id !== idExcluir);
 }
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   ocultarAlerta();
 
+  const cantidadNum = Number(inputCantidad.value);
   const payload = {
     codigo_activo: inputCodigo.value.trim(),
     nombre_equipo: inputNombre.value.trim(),
     categoria: inputCategoria.value,
     estado: inputEstado.value,
     numero_serie: inputSerie.value.trim(),
-    fecha_registro: inputFecha.value,
+    fecha_registro: inputFecha.value || fechaHoyISO(),
     asignado_a: inputAsignado.value.trim(),
-    cantidad: Number(inputCantidad.value)
+    cantidad: cantidadNum
   };
 
   if (!payload.codigo_activo || !payload.nombre_equipo || !payload.categoria || !payload.estado) {
@@ -156,31 +209,34 @@ form.addEventListener('submit', async (e) => {
     return;
   }
 
+  if (!Number.isInteger(cantidadNum) || cantidadNum < 1) {
+    mostrarAlerta('La cantidad debe ser un número entero mayor o igual a 1.', 'error');
+    return;
+  }
+
   const idEdicion = inputId.value;
   const esEdicion = Boolean(idEdicion);
-  const url = esEdicion ? `${API_URL}/${idEdicion}` : API_URL;
-  const metodo = esEdicion ? 'PUT' : 'POST';
 
   btnSubmit.disabled = true;
 
   try {
-    const resp = await fetch(url, {
-      method: metodo,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await resp.json();
-
-    if (!resp.ok) {
-      throw new Error(data.error || 'Ocurrió un error al guardar el registro.');
+    const duplicado = await existeCodigoActivo(payload.codigo_activo, idEdicion);
+    if (duplicado) {
+      throw new Error('Ya existe un equipo registrado con ese código de activo.');
     }
 
-    mostrarAlerta(
-      esEdicion
-        ? `Equipo "${data.codigo_activo}" actualizado correctamente.`
-        : `Equipo "${data.codigo_activo}" registrado correctamente.`,
-      'success'
-    );
+    if (esEdicion) {
+      const docRef = doc(db, 'equipos_it', idEdicion);
+      await updateDoc(docRef, payload);
+      mostrarAlerta(`Equipo "${payload.codigo_activo}" actualizado correctamente.`, 'success');
+    } else {
+      await addDoc(equiposRef, {
+        ...payload,
+        creadoEn: Date.now()
+      });
+      mostrarAlerta(`Equipo "${payload.codigo_activo}" registrado correctamente.`, 'success');
+    }
+
     resetearFormulario();
     await consultarEquipos();
   } catch (err) {
@@ -190,15 +246,20 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
+btnCancelar.addEventListener('click', () => {
+  ocultarAlerta();
+  resetearFormulario();
+});
+
 tablaBody.addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
 
-  const id = Number(btn.dataset.id);
+  const id = btn.dataset.id;
   const action = btn.dataset.action;
 
   if (action === 'edit') {
-    const equipo = equiposCache.find((item) => item.id === id);
+    const equipo = equiposCache.find((item) => String(item.id) === String(id));
     if (equipo) {
       cargarEnFormulario(equipo);
     }
@@ -206,25 +267,21 @@ tablaBody.addEventListener('click', async (e) => {
   }
 
   if (action === 'delete') {
-    const equipo = equiposCache.find((item) => item.id === id);
-    const etiqueta = equipo ? `${equipo.codigo_activo} (${equipo.nombre_equipo})` : `#${id}`;
+    const equipo = equiposCache.find((item) => String(item.id) === String(id));
+    const etiqueta = equipo ? `${equipo.codigo_activo} (${equipo.nombre_equipo})` : id;
     const confirmar = window.confirm(`¿Seguro que deseas borrar el registro ${etiqueta}?`);
     if (!confirmar) return;
 
     ocultarAlerta();
     try {
-      const resp = await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.error || 'No se pudo eliminar el registro.');
-      }
+      await deleteDoc(doc(db, 'equipos_it', id));
       if (inputId.value === String(id)) {
         resetearFormulario();
       }
       mostrarAlerta(`Registro ${etiqueta} eliminado.`, 'success');
       await consultarEquipos();
     } catch (err) {
-      mostrarAlerta(err.message, 'error');
+      mostrarAlerta(err.message || 'No se pudo eliminar el registro.', 'error');
     }
   }
 });
